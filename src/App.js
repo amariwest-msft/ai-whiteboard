@@ -29,7 +29,53 @@ const App = () => {
   // Save workspaces to local storage whenever they change
   useEffect(() => {
     if (!isLoading) {
-      localStorage.setItem('aibrainstorming-workspaces', JSON.stringify(workspaces));
+      try {
+        localStorage.setItem('aibrainstorming-workspaces', JSON.stringify(workspaces));
+      } catch (e) {
+        console.error("Storage quota exceeded. Implementing cleanup strategy...");
+        
+        // Cleanup strategy: Keep newest workspaces, reduce thumbnail quality for others
+        const compressWorkspaces = [...workspaces].map(workspace => {
+          // Create a smaller thumbnail for older workspaces
+          if (workspace.thumbnail && workspace.thumbnail.length > 10000) {
+            const img = new Image();
+            img.src = workspace.thumbnail;
+            
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 100; // Smaller thumbnail
+            canvas.height = 75;
+            
+            // Draw image at reduced size
+            ctx.drawImage(img, 0, 0, 100, 75);
+            
+            // Create extremely compressed thumbnail
+            workspace.thumbnail = canvas.toDataURL('image/jpeg', 0.1);
+          }
+          return workspace;
+        });
+        
+        try {
+          localStorage.setItem('aibrainstorming-workspaces', JSON.stringify(compressWorkspaces));
+        } catch (e2) {
+          // If still failing, keep only the most recent 3 workspaces
+          console.error("Still exceeding quota. Keeping only recent workspaces.");
+          
+          const sortedWorkspaces = [...compressWorkspaces].sort((a, b) => {
+            return new Date(b.lastModified) - new Date(a.lastModified);
+          });
+          
+          // Keep only the most recent 3 workspaces
+          const reducedWorkspaces = sortedWorkspaces.slice(0, 3);
+          
+          try {
+            localStorage.setItem('aibrainstorming-workspaces', JSON.stringify(reducedWorkspaces));
+            alert("Storage limit reached. Only keeping your 3 most recent workspaces.");
+          } catch (e3) {
+            alert("Unable to save workspaces. Storage quota exceeded.");
+          }
+        }
+      }
     }
   }, [workspaces, isLoading]);
 

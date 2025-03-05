@@ -1,8 +1,11 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Canvas, Rect, Ellipse, Textbox, PencilBrush } from 'fabric';
+import * as fabric from 'fabric';
+import TextFormatToolbar from './TextFormatToolbar';
 
-// Enhanced toolbar with save and back buttons
-const Toolbar = ({ activeMode, setActiveMode, clearCanvas, currentColor, setCurrentColor, onSave, onBack }) => {
+const { Canvas, Rect, Ellipse, Textbox, PencilBrush } = fabric;
+
+// Update the Toolbar component to include an Import Image button
+const Toolbar = ({ activeMode, setActiveMode, clearCanvas, currentColor, setCurrentColor, onSave, onBack, onImportImage }) => {
   return (
     <div style={{ 
       padding: '10px', 
@@ -62,6 +65,16 @@ const Toolbar = ({ activeMode, setActiveMode, clearCanvas, currentColor, setCurr
       >
         Text
       </button>
+      {/* Add Import Image button */}
+      <button 
+        onClick={onImportImage}
+        style={{ 
+          backgroundColor: '#6c757d',
+          color: 'white'
+        }}
+      >
+        Import Image
+      </button>
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -110,6 +123,37 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
   const canvasRef = useRef(null);
   const fabricCanvasRef = useRef(null);
   const currentObjectRef = useRef(null);
+  // Add a ref for the file input element
+  const fileInputRef = useRef(null);
+  
+  // Text formatting state
+  const [formatToolbarVisible, setFormatToolbarVisible] = useState(false);
+  const [formatToolbarPosition, setFormatToolbarPosition] = useState({ left: 0, top: 0 });
+  const [activeTextObject, setActiveTextObject] = useState(null);
+  const [isCodeMode, setIsCodeMode] = useState(false);
+  const [highlightColor, setHighlightColor] = useState('#ffff00');
+  
+  // IMPORTANT: Move createRichTextbox definition here, before it's referenced in handleMouseDown
+  // IMPORTANT: Update createRichTextbox to accept position parameters
+  // 1. First, update the createRichTextbox function to ensure text objects are properly identified
+  // Update createRichTextbox to remove LaTeX properties
+  const createRichTextbox = useCallback((text, options = {}) => {
+    return new fabric.IText(text, {
+      left: options.left || 0,
+      top: options.top || 0,
+      fontFamily: 'Arial',
+      fontSize: 20,
+      fill: currentColor,
+      backgroundColor: options?.highlight ? highlightColor : null,
+      width: 300,
+      padding: 5,
+      selectable: true,
+      evented: true,
+      strokeUniform: true,
+      // Remove richTextData or just code-related properties
+      customType: 'richTextbox'
+    });
+  }, [currentColor, highlightColor]);
   
   // Save workspace with thumbnail
   const handleSave = useCallback(() => {
@@ -121,8 +165,8 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
         // Generate thumbnail
         const thumbnail = fabricCanvasRef.current.toDataURL({
           format: 'jpeg',
-          quality: 0.2,
-          multiplier: 0.3
+          quality: 0.1, 
+          multiplier: 0.2 
         });
         
         // Get JSON representation of canvas
@@ -278,6 +322,7 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
   }, [currentColor]);
 
   // Define stable event handlers using useCallback
+  // 2. Update handleMouseDown to explicitly show the toolbar when creating a text
   const handleMouseDown = useCallback((o) => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
@@ -287,29 +332,44 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
     // For text tool, handle differently based on whether we clicked an existing text box
     if (activeMode === 'text') {
       // If we clicked on an existing text box, edit it
-      if (o.target && o.target instanceof Textbox) {
+      if (o.target && (o.target instanceof fabric.IText || o.target instanceof fabric.Textbox)) {
         canvas.setActiveObject(o.target);
         o.target.enterEditing();
         o.target.selectAll();
+        
+        // DIRECTLY SET TOOLBAR POSITION AND VISIBILITY HERE
+        const bounds = o.target.getBoundingRect();
+        console.log("Text object clicked, showing toolbar at:", bounds);
+        setFormatToolbarPosition({
+          left: bounds.left,
+          top: Math.max(bounds.top - 50, 10)
+        });
+        setFormatToolbarVisible(true);
+        setActiveTextObject(o.target);
+        
         canvas.renderAll();
         return;
       }
       
-      // Otherwise create a new text box where the user clicked
-      const textbox = new Textbox('Edit this text', {
+      // Otherwise create a new text box
+      const textbox = createRichTextbox('Edit this text', {
         left: pointer.x,
-        top: pointer.y,
-        fontFamily: 'Arial',
-        fontSize: 20,
-        fill: currentColor, // Use the selected color
-        width: 200,
-        padding: 5,
-        selectable: true,
-        evented: true
+        top: pointer.y
       });
       
       canvas.add(textbox);
       canvas.setActiveObject(textbox);
+      
+      // DIRECTLY SET TOOLBAR POSITION AND VISIBILITY HERE TOO
+      const bounds = textbox.getBoundingRect();
+      console.log("New textbox created, showing toolbar at:", bounds);
+      setFormatToolbarPosition({
+        left: bounds.left,
+        top: Math.max(bounds.top - 50, 10)
+      });
+      setFormatToolbarVisible(true);
+      setActiveTextObject(textbox);
+      
       textbox.enterEditing();
       textbox.selectAll();
       canvas.renderAll();
@@ -328,7 +388,7 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
         width: 1,
         height: 1,
         fill: 'transparent',
-        stroke: currentColor, // Use the selected color
+        stroke: currentColor,
         strokeWidth: 2,
         selectable: false,
         evented: false
@@ -340,7 +400,7 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
         rx: 1,
         ry: 1,
         fill: 'transparent',
-        stroke: currentColor, // Use the selected color
+        stroke: currentColor,
         strokeWidth: 2,
         selectable: false,
         evented: false,
@@ -354,7 +414,7 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
       currentObjectRef.current = newObject;
       canvas.renderAll();
     }
-  }, [activeMode, currentColor]);
+  }, [activeMode, currentColor, startPoint, createRichTextbox, setFormatToolbarPosition, setFormatToolbarVisible, setActiveTextObject]);
 
   const handleMouseMove = useCallback((o) => {
     const canvas = fabricCanvasRef.current;
@@ -470,6 +530,304 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
     }
   }, []);
 
+  // Function to handle image import button click
+  const handleImportImageClick = useCallback(() => {
+    // Trigger the hidden file input click event
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  }, []);
+  
+  // Function to handle file selection
+  const handleFileChange = useCallback((event) => {
+    const file = event.target.files[0];
+    
+    if (file && fabricCanvasRef.current) {
+      const reader = new FileReader();
+      
+      reader.onload = (e) => {
+        console.log("Image loaded, creating fabric image...");
+        const imgData = e.target.result;
+        
+        // Create an HTML image first to get dimensions
+        const img = new Image();
+        img.onload = function() {
+          console.log(`Image dimensions: ${img.width}x${img.height}`);
+          
+          // Create a fabric.Image instance
+          const fabricImage = new fabric.Image(img, {
+            left: 100,
+            top: 100
+          });
+          
+          const canvas = fabricCanvasRef.current;
+          
+          // Scale down large images
+          const maxWidth = canvas.width * 0.8;
+          const maxHeight = canvas.height * 0.8;
+          
+          if (fabricImage.width > maxWidth || fabricImage.height > maxHeight) {
+            const scale = Math.min(maxWidth / fabricImage.width, maxHeight / fabricImage.height);
+            fabricImage.scale(scale);
+          }
+          
+          // Center the image
+          fabricImage.set({
+            left: canvas.width / 2,
+            top: canvas.height / 2,
+            originX: 'center',
+            originY: 'center'
+          });
+          
+          console.log("Adding image to canvas");
+          canvas.add(fabricImage);
+          canvas.setActiveObject(fabricImage);
+          canvas.requestRenderAll(); // Use requestRenderAll for consistent rendering
+          
+          // Switch to select mode
+          setActiveMode('select');
+        };
+        
+        img.onerror = function() {
+          console.error("Failed to load image");
+        };
+        
+        // Set the source of the image to the file data
+        img.src = imgData;
+      };
+      
+      reader.readAsDataURL(file);
+      
+      // Reset the file input
+      event.target.value = '';
+    }
+  }, [setActiveMode]);
+  
+  // Enhanced text editing exited handler
+  useEffect(() => {
+    if (!fabricCanvasRef.current || !canvasInitialized) return;
+    
+    const handleTextEditingExited = (e) => {
+      console.log("Text editing exited:", e.target);
+      if (e.target && e.target.richTextData?.isLatex) {
+        console.log("LaTeX object editing exited, rendering...");
+        setFormatToolbarVisible(false);
+      }
+    };
+    
+    console.log("Setting up text:editing:exited listener");
+    fabricCanvasRef.current.on('text:editing:exited', handleTextEditingExited);
+    
+    return () => {
+      if (fabricCanvasRef.current) {
+        fabricCanvasRef.current.off('text:editing:exited', handleTextEditingExited);
+      }
+    };
+  }, [canvasInitialized]);
+
+  // Add formatting handlers
+  const handleBold = useCallback(() => {
+    if (!activeTextObject || !fabricCanvasRef.current) return;
+    
+    if (activeTextObject.isEditing && activeTextObject.selectionStart !== activeTextObject.selectionEnd) {
+      // If text is selected during editing, apply formatting to selection only
+      const currentStyles = activeTextObject.getSelectionStyles();
+      const isBold = currentStyles[0]?.fontWeight === 'bold';
+      
+      activeTextObject.setSelectionStyles({
+        fontWeight: isBold ? 'normal' : 'bold'
+      });
+    } else {
+      // Apply to entire text if no selection
+      const currentFontWeight = activeTextObject.fontWeight || 'normal';
+      activeTextObject.set('fontWeight', currentFontWeight === 'bold' ? 'normal' : 'bold');
+    }
+    
+    fabricCanvasRef.current.renderAll();
+  }, [activeTextObject]);
+  
+  const handleItalic = useCallback(() => {
+    if (!activeTextObject || !fabricCanvasRef.current) return;
+    
+    if (activeTextObject.isEditing && activeTextObject.selectionStart !== activeTextObject.selectionEnd) {
+      // If text is selected during editing, apply formatting to selection only
+      const currentStyles = activeTextObject.getSelectionStyles();
+      const isItalic = currentStyles[0]?.fontStyle === 'italic';
+      
+      activeTextObject.setSelectionStyles({
+        fontStyle: isItalic ? 'normal' : 'italic'
+      });
+    } else {
+      // Apply to entire text if no selection
+      const currentFontStyle = activeTextObject.fontStyle || 'normal';
+      activeTextObject.set('fontStyle', currentFontStyle === 'italic' ? 'normal' : 'italic');
+    }
+    
+    fabricCanvasRef.current.renderAll();
+  }, [activeTextObject]);
+  
+  const handleUnderline = useCallback(() => {
+    if (!activeTextObject || !fabricCanvasRef.current) return;
+    
+    if (activeTextObject.isEditing && activeTextObject.selectionStart !== activeTextObject.selectionEnd) {
+      // If text is selected during editing, apply formatting to selection only
+      const currentStyles = activeTextObject.getSelectionStyles();
+      const isUnderlined = currentStyles[0]?.underline === true;
+      
+      activeTextObject.setSelectionStyles({
+        underline: !isUnderlined
+      });
+    } else {
+      // Apply to entire text if no selection
+      const currentUnderline = activeTextObject.underline || false;
+      activeTextObject.set('underline', !currentUnderline);
+    }
+    
+    fabricCanvasRef.current.renderAll();
+  }, [activeTextObject]);
+  
+  const handleTextColor = useCallback((color) => {
+    if (!activeTextObject || !fabricCanvasRef.current) return;
+    
+    if (activeTextObject.isEditing && activeTextObject.selectionStart !== activeTextObject.selectionEnd) {
+      // If text is selected during editing, apply formatting to selection only
+      activeTextObject.setSelectionStyles({
+        fill: color
+      });
+    } else {
+      // Apply to entire text if no selection
+      activeTextObject.set('fill', color);
+    }
+    
+    fabricCanvasRef.current.renderAll();
+  }, [activeTextObject]);
+  
+  const handleHighlight = useCallback((color) => {
+    if (!activeTextObject || !fabricCanvasRef.current) return;
+    
+    if (activeTextObject.isEditing && activeTextObject.selectionStart !== activeTextObject.selectionEnd) {
+      // If text is selected during editing, apply formatting to selection only
+      activeTextObject.setSelectionStyles({
+        textBackgroundColor: color
+      });
+    } else {
+      // Apply to entire text if no selection
+      activeTextObject.set('backgroundColor', color);
+    }
+    
+    setHighlightColor(color);
+    fabricCanvasRef.current.renderAll();
+  }, [activeTextObject]);
+  
+  // Enhanced selection handler
+  useEffect(() => {
+    if (!fabricCanvasRef.current || !canvasInitialized) return;
+    
+    const canvas = fabricCanvasRef.current;
+    
+    // Improved selection detection
+    const handleObjectSelected = (e) => {
+      console.log("Object selected:", e.target);
+      
+      // Check if it's a text object
+      const isTextObject = e.target && (
+        e.target instanceof fabric.IText || 
+        e.target instanceof fabric.Textbox || 
+        e.target.customType === 'richTextbox'
+      );
+      
+      if (isTextObject) {
+        const bounds = e.target.getBoundingRect();
+        setFormatToolbarPosition({
+          left: bounds.left,
+          top: Math.max(bounds.top - 50, 10)
+        });
+        setFormatToolbarVisible(true);
+        
+        // Update active text object
+        setActiveTextObject(e.target);
+        
+        // Update code mode based on font family
+        const isMonospaceFont = e.target.fontFamily === 'Courier New' || e.target.fontFamily === 'monospace';
+        setIsCodeMode(isMonospaceFont);
+      } else {
+        setFormatToolbarVisible(false);
+      }
+    };
+    
+    const handleSelectionCleared = () => {
+      console.log("Selection cleared, hiding toolbar");
+      setFormatToolbarVisible(false);
+      // Don't clear activeTextObject here, which would break continuity
+    };
+    
+    canvas.on('selection:created', handleObjectSelected);
+    canvas.on('selection:updated', handleObjectSelected);
+    canvas.on('selection:cleared', handleSelectionCleared);
+    
+    return () => {
+      if (fabricCanvasRef.current) {
+        canvas.off('selection:created', handleObjectSelected);
+        canvas.off('selection:updated', handleObjectSelected);
+        canvas.off('selection:cleared', handleSelectionCleared);
+      }
+    };
+  }, [canvasInitialized]);
+  
+  // 4. Add extra debugging just to make sure the toolbar is working
+  console.log("Toolbar state:", { visible: formatToolbarVisible, position: formatToolbarPosition });
+
+  // Add code formatting handler
+  // Completely revised code formatting handler
+  const handleCodeToggle = useCallback(() => {
+    if (!activeTextObject || !fabricCanvasRef.current) return;
+    
+    console.log("Code toggle clicked");
+    
+    // For partial selection
+    if (activeTextObject.isEditing && activeTextObject.selectionStart !== activeTextObject.selectionEnd) {
+      // Get styles of the first character in the selection
+      const currentStyles = activeTextObject.getSelectionStyles(
+        activeTextObject.selectionStart,
+        activeTextObject.selectionStart + 1
+      );
+      
+      // Check if the selected text is using monospace font
+      const isSelectionInCodeMode = currentStyles[0]?.fontFamily === 'Courier New' || 
+                                   currentStyles[0]?.fontFamily === 'monospace';
+      
+      console.log("Selection is in code mode:", isSelectionInCodeMode);
+      
+      // Toggle the code mode for the selection only
+      activeTextObject.setSelectionStyles({
+        fontFamily: isSelectionInCodeMode ? 'Arial' : 'Courier New',
+        backgroundColor: isSelectionInCodeMode ? '' : '#f5f5f5'
+      }, 
+      activeTextObject.selectionStart, 
+      activeTextObject.selectionEnd);
+      
+    } else {
+      // For entire text object
+      const currentFont = activeTextObject.fontFamily || 'Arial';
+      const isCurrentlyCode = currentFont === 'Courier New' || currentFont === 'monospace';
+      
+      console.log("Entire text is in code mode:", isCurrentlyCode);
+      
+      // Toggle the code mode for the entire text
+      activeTextObject.set({
+        fontFamily: isCurrentlyCode ? 'Arial' : 'Courier New',
+        backgroundColor: isCurrentlyCode ? '' : '#f5f5f5'
+      });
+      
+      // Update the UI state
+      setIsCodeMode(!isCurrentlyCode);
+    }
+    
+    // Force update the canvas
+    fabricCanvasRef.current.requestRenderAll();
+    
+  }, [activeTextObject]);
+
   return (
     <div className="whiteboard-container" style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Toolbar 
@@ -480,6 +838,7 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
         setCurrentColor={setCurrentColor}
         onSave={handleSave}
         onBack={onNavigateBack}
+        onImportImage={handleImportImageClick}
       />
       
       {/* Workspace name input */}
@@ -508,8 +867,48 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
         </span>
       </div>
       
-      <div className="canvas-container" style={{ flex: 1, overflow: 'hidden' }}>
+      <div className="canvas-container" style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         <canvas ref={canvasRef} style={{ width: '100%', height: '100%' }} />
+        
+        {/* Add a visible indicator for debugging */}
+        {formatToolbarVisible && (
+          <div style={{
+            position: 'absolute',
+            left: formatToolbarPosition.left + 'px',
+            top: formatToolbarPosition.top + 'px',
+            backgroundColor: 'red',
+            width: '10px',
+            height: '10px',
+            borderRadius: '50%',
+            zIndex: 2000
+          }} />
+        )}
+        
+        {/* Text formatting toolbar - now imported as a separate component */}
+        <TextFormatToolbar 
+          visible={formatToolbarVisible}
+          position={formatToolbarPosition}
+          onBold={handleBold}
+          onItalic={handleItalic}
+          onUnderline={handleUnderline}
+          onColor={handleTextColor}
+          onHighlight={handleHighlight}
+          onCodeToggle={handleCodeToggle}  // Replace onLatexToggle with onCodeToggle
+          isCodeMode={isCodeMode}         // Replace isLatexMode with isCodeMode
+          currentColor={currentColor}
+          currentHighlightColor={highlightColor}
+          onChangeColor={handleTextColor}
+          onChangeHighlightColor={handleHighlight}
+        />
+        
+        {/* Hidden file input for image upload */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          style={{ display: 'none' }}
+          accept="image/*"
+          onChange={handleFileChange}
+        />
       </div>
     </div>
   );
