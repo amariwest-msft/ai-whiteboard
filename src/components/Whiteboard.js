@@ -1,15 +1,22 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Canvas, Rect, Ellipse, Textbox, PencilBrush } from 'fabric';
 
-// Enhanced toolbar with selection tool and text box
-const Toolbar = ({ activeMode, setActiveMode, clearCanvas }) => {
+// Enhanced toolbar with save and back buttons
+const Toolbar = ({ activeMode, setActiveMode, clearCanvas, currentColor, setCurrentColor, onSave, onBack }) => {
   return (
     <div style={{ 
       padding: '10px', 
       backgroundColor: '#f0f0f0', 
       display: 'flex', 
-      gap: '10px' 
+      gap: '10px', 
+      alignItems: 'center' 
     }}>
+      <button 
+        onClick={onBack}
+        style={{ marginRight: '10px' }}
+      >
+        ← Back
+      </button>
       <button 
         onClick={() => setActiveMode('select')}
         style={{ 
@@ -55,22 +62,160 @@ const Toolbar = ({ activeMode, setActiveMode, clearCanvas }) => {
       >
         Text
       </button>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '5px',
+        marginLeft: '10px'
+      }}>
+        <label htmlFor="colorPicker" style={{ fontSize: '14px' }}>Color:</label>
+        <input
+          id="colorPicker"
+          type="color"
+          value={currentColor}
+          onChange={(e) => setCurrentColor(e.target.value)}
+          style={{ width: '30px', height: '30px', cursor: 'pointer' }}
+        />
+      </div>
       <button onClick={clearCanvas}>Clear</button>
+      <div style={{ marginLeft: 'auto' }}>
+        <button 
+          onClick={onSave}
+          style={{ 
+            backgroundColor: '#28a745', 
+            color: 'white',
+            border: 'none',
+            padding: '5px 15px',
+            borderRadius: '4px'
+          }}
+        >
+          Save
+        </button>
+      </div>
     </div>
   );
 };
 
-const Whiteboard = () => {
-  // Main state
-  const [activeMode, setActiveMode] = useState('select'); // Default to select mode
+const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData }) => {
+  // Existing state
+  const [activeMode, setActiveMode] = useState('select');
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPoint, setStartPoint] = useState({ x: 0, y: 0 });
   const [canvasInitialized, setCanvasInitialized] = useState(false);
+  const [currentColor, setCurrentColor] = useState('#000000');
+  // New state for workspace name
+  const [workspaceName, setWorkspaceName] = useState(initialData?.name || "New Workspace");
   
   // Refs
   const canvasRef = useRef(null);
   const fabricCanvasRef = useRef(null);
   const currentObjectRef = useRef(null);
+  
+  // Save workspace with thumbnail
+  const handleSave = useCallback(() => {
+    if (fabricCanvasRef.current) {
+      // Generate thumbnail
+      const thumbnail = fabricCanvasRef.current.toDataURL({
+        format: 'jpeg',
+        quality: 0.2,
+        multiplier: 0.3
+      });
+      
+      // Get JSON representation of canvas
+      const canvasJSON = fabricCanvasRef.current.toJSON();
+      
+      // Save workspace
+      onSaveWorkspace({
+        id: workspaceId,
+        name: workspaceName,
+        lastModified: new Date().toISOString(),
+        thumbnail: thumbnail,
+        data: canvasJSON
+      });
+    }
+  }, [workspaceId, workspaceName, onSaveWorkspace]);
+  
+  // Initialize canvas and load data if present
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    if (!fabricCanvasRef.current) {
+      const canvas = new Canvas(canvasRef.current, {
+        backgroundColor: '#ffffff',
+        selection: true
+      });
+      
+      fabricCanvasRef.current = canvas;
+      
+      // Set up brush
+      fabricCanvasRef.current.freeDrawingBrush = new PencilBrush(fabricCanvasRef.current);
+      fabricCanvasRef.current.freeDrawingBrush.width = 3;
+      fabricCanvasRef.current.freeDrawingBrush.color = currentColor;
+      
+      // Set dimensions
+      const updateCanvasSize = () => {
+        if (fabricCanvasRef.current) {
+          const width = window.innerWidth;
+          const height = window.innerHeight - 60;
+          fabricCanvasRef.current.setWidth(width);
+          fabricCanvasRef.current.setHeight(height);
+          
+          // Load saved data if available
+          if (initialData && initialData.data) {
+            fabricCanvasRef.current.loadFromJSON(initialData.data, () => {
+              fabricCanvasRef.current.renderAll();
+            });
+          } else {
+            fabricCanvasRef.current.renderAll();
+          }
+        }
+      };
+      
+      setTimeout(updateCanvasSize, 100);
+      setCanvasInitialized(true);
+    }
+    
+    // Handle resize
+    const handleResize = () => {
+      if (fabricCanvasRef.current && canvasRef.current) {
+        const width = window.innerWidth;
+        const height = window.innerHeight - 60;
+        fabricCanvasRef.current.setWidth(width);
+        fabricCanvasRef.current.setHeight(height);
+        fabricCanvasRef.current.renderAll();
+      }
+    };
+    
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (fabricCanvasRef.current) {
+        const canvas = fabricCanvasRef.current;
+        fabricCanvasRef.current = null;
+        canvas.dispose();
+      }
+    };
+  }, [initialData, currentColor]);
+
+  // Update pen color when color changes
+  useEffect(() => {
+    if (fabricCanvasRef.current && fabricCanvasRef.current.freeDrawingBrush) {
+      fabricCanvasRef.current.freeDrawingBrush.color = currentColor;
+      
+      // If there's a selected object, update its color too
+      const activeObject = fabricCanvasRef.current.getActiveObject();
+      if (activeObject) {
+        if (activeObject.stroke) {
+          activeObject.set({ stroke: currentColor });
+        }
+        if (activeObject.fill && activeObject.fill !== 'transparent') {
+          activeObject.set({ fill: currentColor });
+        }
+        fabricCanvasRef.current.renderAll();
+      }
+    }
+  }, [currentColor]);
 
   // Define stable event handlers using useCallback
   const handleMouseDown = useCallback((o) => {
@@ -96,7 +241,7 @@ const Whiteboard = () => {
         top: pointer.y,
         fontFamily: 'Arial',
         fontSize: 20,
-        fill: 'black',
+        fill: currentColor, // Use the selected color
         width: 200,
         padding: 5,
         selectable: true,
@@ -123,7 +268,7 @@ const Whiteboard = () => {
         width: 1,
         height: 1,
         fill: 'transparent',
-        stroke: 'black',
+        stroke: currentColor, // Use the selected color
         strokeWidth: 2,
         selectable: false,
         evented: false
@@ -135,7 +280,7 @@ const Whiteboard = () => {
         rx: 1,
         ry: 1,
         fill: 'transparent',
-        stroke: 'black',
+        stroke: currentColor, // Use the selected color
         strokeWidth: 2,
         selectable: false,
         evented: false,
@@ -149,7 +294,7 @@ const Whiteboard = () => {
       currentObjectRef.current = newObject;
       canvas.renderAll();
     }
-  }, [activeMode]);
+  }, [activeMode, currentColor]);
 
   const handleMouseMove = useCallback((o) => {
     const canvas = fabricCanvasRef.current;
@@ -211,68 +356,6 @@ const Whiteboard = () => {
     canvas.renderAll();
   }, [activeMode, isDrawing]);
   
-  // Initialize the canvas once
-  useEffect(() => {
-    // Wait for the canvas DOM element to be ready
-    if (!canvasRef.current) return;
-
-    // Create canvas instance only once
-    if (!fabricCanvasRef.current) {
-      // Create the canvas with initial dimensions
-      const canvas = new Canvas(canvasRef.current, {
-        backgroundColor: '#ffffff',
-        selection: true // Enable multi-selection with dragging
-      });
-      
-      fabricCanvasRef.current = canvas;
-      
-      // Set initial brush settings
-      fabricCanvasRef.current.freeDrawingBrush = new PencilBrush(fabricCanvasRef.current);
-      fabricCanvasRef.current.freeDrawingBrush.width = 3;
-      fabricCanvasRef.current.freeDrawingBrush.color = '#000000';
-      
-      // Set initial dimensions after canvas is ready
-      const updateCanvasSize = () => {
-        if (fabricCanvasRef.current) {
-          const width = window.innerWidth;
-          const height = window.innerHeight - 60;
-          fabricCanvasRef.current.setWidth(width);
-          fabricCanvasRef.current.setHeight(height);
-          fabricCanvasRef.current.renderAll();
-        }
-      };
-      
-      // First render after a short delay to ensure DOM is ready
-      setTimeout(updateCanvasSize, 100);
-      setCanvasInitialized(true);
-    }
-    
-    // Handle window resize safely
-    const handleResize = () => {
-      if (fabricCanvasRef.current && canvasRef.current) {
-        const width = window.innerWidth;
-        const height = window.innerHeight - 60;
-        fabricCanvasRef.current.setWidth(width);
-        fabricCanvasRef.current.setHeight(height);
-        fabricCanvasRef.current.renderAll();
-      }
-    };
-    
-    window.addEventListener('resize', handleResize);
-    
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      if (fabricCanvasRef.current) {
-        // Save a reference before cleanup
-        const canvas = fabricCanvasRef.current;
-        // Clear the ref first to prevent further access
-        fabricCanvasRef.current = null;
-        // Then dispose
-        canvas.dispose();
-      }
-    };
-  }, []);
-  
   // Handle tool changes - with safer checks
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
@@ -333,7 +416,38 @@ const Whiteboard = () => {
         activeMode={activeMode}
         setActiveMode={setActiveMode}
         clearCanvas={clearCanvas}
+        currentColor={currentColor}
+        setCurrentColor={setCurrentColor}
+        onSave={handleSave}
+        onBack={onNavigateBack}
       />
+      
+      {/* Workspace name input */}
+      <div style={{ 
+        padding: '5px 10px', 
+        backgroundColor: '#f8f8f8', 
+        borderBottom: '1px solid #ddd',
+        display: 'flex',
+        alignItems: 'center'
+      }}>
+        <input
+          type="text"
+          value={workspaceName}
+          onChange={(e) => setWorkspaceName(e.target.value)}
+          placeholder="Workspace Name"
+          style={{
+            fontSize: '16px',
+            padding: '5px',
+            border: '1px solid #ddd',
+            borderRadius: '4px',
+            width: '300px'
+          }}
+        />
+        <span style={{ marginLeft: '10px', fontSize: '12px', color: '#666' }}>
+          Last saved: {initialData?.lastModified ? new Date(initialData.lastModified).toLocaleString() : 'Never'}
+        </span>
+      </div>
+      
       <div className="canvas-container" style={{ flex: 1, overflow: 'hidden' }}>
         <canvas ref={canvasRef} style={{ width: '100%', height: '100%' }} />
       </div>
