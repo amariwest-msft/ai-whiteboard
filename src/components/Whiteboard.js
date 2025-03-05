@@ -114,24 +114,66 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
   // Save workspace with thumbnail
   const handleSave = useCallback(() => {
     if (fabricCanvasRef.current) {
-      // Generate thumbnail
-      const thumbnail = fabricCanvasRef.current.toDataURL({
-        format: 'jpeg',
-        quality: 0.2,
-        multiplier: 0.3
-      });
-      
-      // Get JSON representation of canvas
-      const canvasJSON = fabricCanvasRef.current.toJSON();
-      
-      // Save workspace
-      onSaveWorkspace({
-        id: workspaceId,
-        name: workspaceName,
-        lastModified: new Date().toISOString(),
-        thumbnail: thumbnail,
-        data: canvasJSON
-      });
+      try {
+        // Store objects temporarily to ensure they don't get lost
+        const canvasObjects = [...fabricCanvasRef.current.getObjects()];
+        
+        // Generate thumbnail
+        const thumbnail = fabricCanvasRef.current.toDataURL({
+          format: 'jpeg',
+          quality: 0.2,
+          multiplier: 0.3
+        });
+        
+        // Get JSON representation of canvas
+        const canvasJSON = fabricCanvasRef.current.toJSON();
+        
+        // Save workspace
+        onSaveWorkspace({
+          id: workspaceId,
+          name: workspaceName,
+          lastModified: new Date().toISOString(),
+          thumbnail: thumbnail,
+          data: canvasJSON
+        });
+        
+        // Force multiple re-renders to ensure canvas elements are visible
+        setTimeout(() => {
+          if (fabricCanvasRef.current) {
+            // Ensure all objects are still on the canvas
+            if (fabricCanvasRef.current.getObjects().length < canvasObjects.length) {
+              // If objects were lost, restore them
+              canvasObjects.forEach(obj => {
+                if (!fabricCanvasRef.current.contains(obj)) {
+                  fabricCanvasRef.current.add(obj);
+                }
+              });
+            }
+            
+            // Multiple render attempts for reliability
+            fabricCanvasRef.current.requestRenderAll();
+            
+            setTimeout(() => {
+              if (fabricCanvasRef.current) {
+                fabricCanvasRef.current.requestRenderAll();
+              }
+            }, 100);
+            
+            setTimeout(() => {
+              if (fabricCanvasRef.current) {
+                fabricCanvasRef.current.requestRenderAll();
+              }
+            }, 500);
+          }
+        }, 0);
+        
+      } catch (error) {
+        console.error("Error during save:", error);
+        // Make sure we still try to render if an error occurs
+        if (fabricCanvasRef.current) {
+          fabricCanvasRef.current.requestRenderAll();
+        }
+      }
     }
   }, [workspaceId, workspaceName, onSaveWorkspace]);
   
@@ -156,7 +198,7 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
       const updateCanvasSize = () => {
         if (fabricCanvasRef.current) {
           const width = window.innerWidth;
-          const height = window.innerHeight - 60;
+          const height = window.innerHeight - 60 - 46; // Account for toolbar and workspace name input
           fabricCanvasRef.current.setWidth(width);
           fabricCanvasRef.current.setHeight(height);
           
@@ -171,6 +213,8 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
         }
       };
       
+      // Run immediately and again after a short delay to ensure DOM is ready
+      updateCanvasSize();
       setTimeout(updateCanvasSize, 100);
       setCanvasInitialized(true);
     }
@@ -179,7 +223,7 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
     const handleResize = () => {
       if (fabricCanvasRef.current && canvasRef.current) {
         const width = window.innerWidth;
-        const height = window.innerHeight - 60;
+        const height = window.innerHeight - 60 - 46; // Account for toolbar and workspace name input
         fabricCanvasRef.current.setWidth(width);
         fabricCanvasRef.current.setHeight(height);
         fabricCanvasRef.current.renderAll();
@@ -196,7 +240,23 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
         canvas.dispose();
       }
     };
-  }, [initialData, currentColor]);
+  }, [initialData]);
+
+  // Add a new effect that ensures the canvas is rendered after it's fully mounted
+  useEffect(() => {
+    if (canvasInitialized && fabricCanvasRef.current) {
+      // Force a re-render of the canvas after initialization
+      const renderCanvas = () => {
+        if (fabricCanvasRef.current) {
+          fabricCanvasRef.current.requestRenderAll();
+        }
+      };
+      
+      renderCanvas();
+      // Try again after a short delay to ensure all elements are loaded
+      setTimeout(renderCanvas, 300);
+    }
+  }, [canvasInitialized]);
 
   // Update pen color when color changes
   useEffect(() => {
