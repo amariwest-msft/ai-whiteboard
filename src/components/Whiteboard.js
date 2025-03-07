@@ -835,12 +835,15 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
         canvas.add(childNode);
         sourceNode.addConnection(childNode, canvas);
         
-        // Add event handlers
+        // Add event handlers - FIX: Add handlers for BOTH buttons
         childNode.on('mousedown', (e) => {
           const target = e.subTargets ? e.subTargets[0] : null;
           if (target && target === childNode.expandButton) {
             e.e.stopPropagation();
             handleExpandNode(childNode);
+          } else if (target && target === childNode.summarizeButton) {
+            e.e.stopPropagation();
+            handleSummarizeNode(childNode);
           }
         });
         
