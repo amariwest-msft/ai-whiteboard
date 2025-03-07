@@ -1,4 +1,4 @@
-# AI Brainstorming App
+# AI Brainstorming App - Think Tank
 
 An interactive application that leverages AI to help you generate, organize, and refine ideas for your projects.
 
