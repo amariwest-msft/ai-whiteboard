@@ -436,6 +436,9 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
         if (target && target === newNode.expandButton) {
           e.e.stopPropagation();
           handleExpandNode(newNode);
+        } else if (target && target === newNode.summarizeButton) {
+          e.e.stopPropagation();
+          handleSummarizeNode(newNode);
         }
       });
       
@@ -812,6 +815,203 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
     expandWithIdeas();
     
   }, [currentColor, apiConfig]);
+  
+  // Add function to handle node summarization
+const handleSummarizeNode = useCallback((sourceNode) => {
+  if (!fabricCanvasRef.current) return;
+  const canvas = fabricCanvasRef.current;
+  
+  // Get text from source node
+  const sourceText = sourceNode.getText();
+  
+  // Build tree context by traversing the mind map (same as in handleExpandNode)
+  const buildNodeContext = (node) => {
+    if (!node) return null;
+    
+    // Create base node representation
+    const nodeContext = {
+      id: node.nodeId,
+      text: node.getText(),
+      children: []
+    };
+    
+    // Recursively add children if any
+    if (node.connections && node.connections.length > 0) {
+      node.connections.forEach(conn => {
+        // Find the target node in the canvas
+        const targetNode = canvas.getObjects().find(obj => 
+          obj.nodeType === 'mindMapNode' && obj.nodeId === conn.targetId
+        );
+        
+        if (targetNode) {
+          nodeContext.children.push(buildNodeContext(targetNode));
+        }
+      });
+    }
+    
+    return nodeContext;
+  };
+  
+  // Find the root node by traversing up the tree (same as in handleExpandNode)
+  const findRootNode = (startNode) => {
+    // Check all nodes to find if any has this node as a target
+    const allNodes = canvas.getObjects().filter(obj => obj.nodeType === 'mindMapNode');
+    
+    for (const node of allNodes) {
+      if (node.connections && node.connections.some(conn => conn.targetId === startNode.nodeId)) {
+        // This node is a parent, so recurse upward
+        return findRootNode(node);
+      }
+    }
+    
+    // If no parent found, this is a root node
+    return startNode;
+  };
+  
+  // Get the root node and build the complete context
+  const rootNode = findRootNode(sourceNode);
+  const fullTreeContext = buildNodeContext(rootNode);
+  
+  // Generate summary for the node
+  const generateSummary = async (text) => {
+    try {
+      setIsLoading(true);
+      
+      // Azure OpenAI requires a different URL format and headers (same as handleExpandNode)
+      const apiUrl = `${apiConfig.endpoint}/openai/deployments/${apiConfig.deployment}/chat/completions?api-version=2024-10-21`;
+      
+      // DEBUG: Log the tree context and path
+      console.log("Mind map tree context for summary:", fullTreeContext);
+      console.log("Current node for summary:", sourceText);
+      
+      // Get the path from root to current node for context (same as handleExpandNode)
+      const getNodePath = (treeNode, targetId, currentPath = []) => {
+        if (treeNode.id === targetId) {
+          return [...currentPath, treeNode.text];
+        }
+        
+        for (const child of treeNode.children) {
+          const path = getNodePath(child, targetId, [...currentPath, treeNode.text]);
+          if (path) return path;
+        }
+        
+        return null;
+      };
+      
+      // Get the full path from root to current node
+      const nodePath = getNodePath(fullTreeContext, sourceNode.nodeId) || [fullTreeContext.text];
+      
+      // Construct context-aware prompt for summarization
+      const systemPrompt = 
+        "You are an AI mind mapping assistant. Create a concise summary of the provided concept. " +
+        "Your summary should be 5-10 words maximum - an extremely brief phrase that captures the " +
+        "essence while maintaining focus on the overall topic. Ensure that your summary directly " +
+        "relates to the concept and fits within the complete mind map context.";
+      
+      // Create a simplified tree representation for the prompt (same as handleExpandNode)
+      const formatTreeForPrompt = (node, depth = 0) => {
+        const indent = "  ".repeat(depth);
+        let result = `${indent}- ${node.text}\n`;
+        
+        node.children.forEach(child => {
+          result += formatTreeForPrompt(child, depth + 1);
+        });
+        
+        return result;
+      };
+      
+      const treeRepresentation = formatTreeForPrompt(fullTreeContext);
+      const userPrompt = 
+        `I'm creating a mind map with the following structure:\n\n${treeRepresentation}\n` +
+        `I need to create a summary of this concept: "${text}"\n` +
+        `This node is in the context path: ${nodePath.join(" > ")}\n\n` +
+        `Generate a concise summary (5-10 words maximum) that captures the essence of this concept ` +
+        `while maintaining clear relevance to both its context and the main topic.`;
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': apiConfig.key
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ],
+          temperature: 0.7,
+          max_completion_tokens: 50
+        })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("API Error response:", errorText);
+        return `Summary error: ${response.status}`;
+      }
+      
+      const data = await response.json();
+      const content = data.choices[0].message.content;
+      
+      console.log("FULL SUMMARY RESPONSE:", content);
+      
+      // Return the trimmed summary
+      return content.trim();
+    } catch (error) {
+      console.error('Error generating summary:', error);
+      // Provide fallback summary on error
+      return 'Brief summary of concept';
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Make the function async to handle the API call
+  const summarizeWithApi = async () => {
+    const summary = await generateSummary(sourceText);
+    
+    // Calculate position for the summary node - place it below the source node
+    const x = sourceNode.left;
+    const y = sourceNode.top + 150; // Place it below the source node
+    
+    // Create summary node
+    const summaryNode = createMindMapNode({
+      canvas,
+      left: x,
+      top: y,
+      text: summary,
+      fill: '#fff0f5', // Light pink background to distinguish from expansion nodes
+      stroke: currentColor
+    });
+    
+    // Add to canvas and create connections
+    canvas.add(summaryNode);
+    sourceNode.addConnection(summaryNode, canvas);
+    
+    // Add event handlers
+    summaryNode.on('mousedown', (e) => {
+      const target = e.subTargets ? e.subTargets[0] : null;
+      if (target && target === summaryNode.expandButton) {
+        e.e.stopPropagation();
+        handleExpandNode(summaryNode);
+      } else if (target && target === summaryNode.summarizeButton) {
+        e.e.stopPropagation();
+        handleSummarizeNode(summaryNode);
+      }
+    });
+    
+    summaryNode.on('moving', () => {
+      summaryNode.updateConnections(canvas);
+      canvas.requestRenderAll();
+    });
+    
+    canvas.requestRenderAll();
+  };
+  
+  // Call the async function
+  summarizeWithApi();
+  
+}, [currentColor, apiConfig]);
   
   // Handle tool changes - with safer checks
   useEffect(() => {
@@ -1786,7 +1986,7 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
       canvas.off('mouse:down', handleMindMapInteractions);
       canvas.off('mouse:dblclick', handleMindMapInteractions);
     };
-  }, [canvasInitialized, handleExpandNode]);
+  }, [canvasInitialized, handleExpandNode, handleSummarizeNode]);
 
   return (
     <div className="whiteboard-container" style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column' }}>

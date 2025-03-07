@@ -55,7 +55,7 @@ const createMindMapNode = ({ canvas, left = 100, top = 100, text = 'New Idea', f
     strokeWidth: 1,
     originX: 'center',
     originY: 'center',
-    left: 0,
+    left: -20, // Moved left to make room for summarize button
     top: textHeight/2 - 20,
     shadow: {
       color: 'rgba(0,0,0,0.2)',
@@ -64,14 +64,14 @@ const createMindMapNode = ({ canvas, left = 100, top = 100, text = 'New Idea', f
       offsetY: 1
     },
     selectable: false,
-    evented: true,       // Important: Make it receive events
-    hoverCursor: 'pointer',  // Show pointer on hover
-    isExpandButton: true  // Special marker for identification
+    evented: true,
+    hoverCursor: 'pointer',
+    isExpandButton: true
   });
   
   // Create plus sign with improved properties
   const expandIcon = new Text('+', {
-    left: 0,
+    left: -20, // Match the button's position
     top: textHeight/2 - 22,
     fontSize: 20,
     fontWeight: 'bold',
@@ -80,13 +80,54 @@ const createMindMapNode = ({ canvas, left = 100, top = 100, text = 'New Idea', f
     originX: 'center',
     originY: 'center',
     selectable: false,
-    evented: true,       // Important: Make it receive events
-    hoverCursor: 'pointer',  // Show pointer on hover
-    isExpandIcon: true   // Special marker for identification
+    evented: true,
+    hoverCursor: 'pointer',
+    isExpandIcon: true
   });
   
-  // Create node group
-  const nodeGroup = new Group([background, textbox, expandButton, expandIcon], {
+  // Create RECTANGULAR summarize button with similar properties
+  const summarizeButton = new Rect({
+    width: 30,
+    height: 30,
+    rx: 5,
+    ry: 5,
+    fill: stroke,
+    stroke: '#ffffff',
+    strokeWidth: 1,
+    originX: 'center',
+    originY: 'center',
+    left: 20, // Positioned to the right of expand button
+    top: textHeight/2 - 20,
+    shadow: {
+      color: 'rgba(0,0,0,0.2)',
+      blur: 4,
+      offsetX: 1,
+      offsetY: 1
+    },
+    selectable: false,
+    evented: true,
+    hoverCursor: 'pointer',
+    isSummarizeButton: true // Special marker for identification
+  });
+  
+  // Create 'S' letter icon
+  const summarizeIcon = new Text('S', {
+    left: 20, // Match the button's position
+    top: textHeight/2 - 22,
+    fontSize: 20,
+    fontWeight: 'bold',
+    fontFamily: 'Arial',
+    fill: 'white',
+    originX: 'center',
+    originY: 'center',
+    selectable: false,
+    evented: true,
+    hoverCursor: 'pointer',
+    isSummarizeIcon: true // Special marker for identification
+  });
+  
+  // Create node group with both buttons
+  const nodeGroup = new Group([background, textbox, expandButton, expandIcon, summarizeButton, summarizeIcon], {
     left: left,
     top: top,
     originX: 'center',
@@ -102,6 +143,7 @@ const createMindMapNode = ({ canvas, left = 100, top = 100, text = 'New Idea', f
   nodeGroup.connections = [];
   nodeGroup.textObject = textbox;
   nodeGroup.expandButton = expandButton;
+  nodeGroup.summarizeButton = summarizeButton; // Add reference to summarize button
   nodeGroup.nodeType = 'mindMapNode';
   
   // Function to get text content
@@ -126,10 +168,23 @@ const createMindMapNode = ({ canvas, left = 100, top = 100, text = 'New Idea', f
     });
     
     expandButton.set({
+      left: -20,
       top: textHeight/2 - 20
     });
     
     expandIcon.set({
+      left: -20,
+      top: textHeight/2 - 22
+    });
+    
+    // Update summarize button position too
+    summarizeButton.set({
+      left: 20,
+      top: textHeight/2 - 20
+    });
+    
+    summarizeIcon.set({
+      left: 20,
       top: textHeight/2 - 22
     });
     
