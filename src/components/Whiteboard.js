@@ -416,6 +416,38 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
         return;
       }
       
+      // Add buffer check to prevent creating nodes too close to existing objects
+      const bufferDistance = 30; // Distance in pixels to keep from other objects
+      const nearbyObjects = canvas.getObjects().filter(obj => {
+        // Skip non-visible objects
+        if (!obj.visible) return false;
+        
+        // Calculate distance from click to object center
+        const objCenterX = obj.left + (obj.width || 0) * (obj.originX === 'center' ? 0 : 0.5);
+        const objCenterY = obj.top + (obj.height || 0) * (obj.originY === 'center' ? 0 : 0.5);
+        
+        // For groups and complex objects, use bounding box
+        const bounds = obj.getBoundingRect();
+        if (bounds) {
+          // Check if click is within buffer distance of the object's bounding box
+          return (
+            pointer.x >= bounds.left - bufferDistance &&
+            pointer.x <= bounds.left + bounds.width + bufferDistance &&
+            pointer.y >= bounds.top - bufferDistance &&
+            pointer.y <= bounds.top + bounds.height + bufferDistance
+          );
+        }
+        
+        // For simple objects, use a circular buffer
+        const distance = Math.sqrt(Math.pow(pointer.x - objCenterX, 2) + Math.pow(pointer.y - objCenterY, 2));
+        return distance < ((obj.width || 50) / 2 + bufferDistance);
+      });
+      
+      // If there are nearby objects, don't create a new mind map node
+      if (nearbyObjects.length > 0) {
+        return;
+      }
+      
       // If we reach here, user clicked on empty canvas space, create new node
       const newNode = createMindMapNode({
         canvas,
@@ -428,6 +460,16 @@ const Whiteboard = ({ workspaceId, onSaveWorkspace, onNavigateBack, initialData 
       
       canvas.add(newNode);
       canvas.setActiveObject(newNode);
+      
+      // Automatically enter edit mode with text selected for immediate typing
+      setTimeout(() => {
+        newNode.editText();
+        
+        // If the textObject has selectAll method, use it to select all text
+        if (newNode.textObject && newNode.textObject.selectAll) {
+          newNode.textObject.selectAll();
+        }
+      }, 50);
       
       // Add event listener for the expand button
       newNode.on('mousedown', (e) => {
@@ -904,7 +946,7 @@ const handleSummarizeNode = useCallback((sourceNode) => {
       // Construct context-aware prompt for summarization
       const systemPrompt = 
         "You are an AI mind mapping assistant. Create a concise summary of the provided concept. " +
-        "Your summary should be 5-10 words maximum - an extremely brief phrase that captures the " +
+        "Your summary should be 20-30 words maximum - a brief paragraph that captures the " +
         "essence while maintaining focus on the overall topic. Ensure that your summary directly " +
         "relates to the concept and fits within the complete mind map context.";
       
@@ -925,7 +967,7 @@ const handleSummarizeNode = useCallback((sourceNode) => {
         `I'm creating a mind map with the following structure:\n\n${treeRepresentation}\n` +
         `I need to create a summary of this concept: "${text}"\n` +
         `This node is in the context path: ${nodePath.join(" > ")}\n\n` +
-        `Generate a concise summary (5-10 words maximum) that captures the essence of this concept ` +
+        `Generate a concise summary (20-30 words maximu) that captures the essence of this concept ` +
         `while maintaining clear relevance to both its context and the main topic.`;
       
       const response = await fetch(apiUrl, {
@@ -940,7 +982,7 @@ const handleSummarizeNode = useCallback((sourceNode) => {
             { role: "user", content: userPrompt }
           ],
           temperature: 0.7,
-          max_completion_tokens: 50
+          max_completion_tokens: 100
         })
       });
       
